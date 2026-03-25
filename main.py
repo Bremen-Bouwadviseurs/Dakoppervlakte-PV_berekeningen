@@ -163,6 +163,19 @@ def polygon_centroid(coords: List[Tuple[float, float]]) -> Tuple[float, float]:
 	return sum(lats) / len(lats), sum(lons) / len(lons)
 
 
+def project_to_local_meters(
+	lat: float,
+	lon: float,
+	reference_lat: float,
+	reference_lon: float,
+) -> Tuple[float, float]:
+	lat_scale = 111320.0
+	lon_scale = 111320.0 * math.cos(math.radians(reference_lat))
+	x_m = (lon - reference_lon) * lon_scale
+	y_m = (lat - reference_lat) * lat_scale
+	return x_m, y_m
+
+
 def point_in_polygon(lat: float, lon: float, polygon: List[Tuple[float, float]]) -> bool:
 	inside = False
 	for i in range(len(polygon) - 1):
@@ -176,14 +189,15 @@ def point_in_polygon(lat: float, lon: float, polygon: List[Tuple[float, float]])
 	return inside
 
 
-def polygon_area_m2(coords: List[Tuple[float, float]]) -> float:
-	centroid_lat, centroid_lon = polygon_centroid(coords)
-	lat_scale = 111320.0
-	lon_scale = 111320.0 * math.cos(math.radians(centroid_lat))
+def polygon_area_m2(
+	coords: List[Tuple[float, float]], reference_point: Optional[Tuple[float, float]] = None
+) -> float:
+	if reference_point is None:
+		reference_point = polygon_centroid(coords)
 
+	reference_lat, reference_lon = reference_point
 	projected = [
-		((lon - centroid_lon) * lon_scale, (lat - centroid_lat) * lat_scale)
-		for lat, lon in coords
+		project_to_local_meters(lat, lon, reference_lat, reference_lon) for lat, lon in coords
 	]
 
 	area_2 = 0.0
@@ -352,7 +366,7 @@ class RoofDesktopApp:
 			if not polygon:
 				raise ValueError("Geen gebouwcontour gevonden in de buurt van dit adres.")
 
-			area_m2 = polygon_area_m2(polygon)
+			area_m2 = polygon_area_m2(polygon, (lat, lon))
 			display_name = location.get("display_name", "Onbekende locatie")
 			self.root.after(0, self._show_result, area_m2, display_name, polygon, (lat, lon))
 		except requests.HTTPError as exc:
@@ -416,7 +430,11 @@ class RoofDesktopApp:
 
 		self._draw_grid(w, h)
 
-		points = [(lon, lat) for lat, lon in polygon[:-1]]
+		reference_lat, reference_lon = point
+		points = [
+			project_to_local_meters(lat, lon, reference_lat, reference_lon)
+			for lat, lon in polygon[:-1]
+		]
 		x_vals = [p[0] for p in points]
 		y_vals = [p[1] for p in points]
 
@@ -432,14 +450,14 @@ class RoofDesktopApp:
 		padding = 30
 		scale = min((w - 2 * padding) / dx, (h - 2 * padding) / dy)
 
-		def to_canvas(lon: float, lat: float) -> Tuple[float, float]:
-			x = padding + (lon - min_x) * scale
-			y = h - (padding + (lat - min_y) * scale)
+		def to_canvas(x_m: float, y_m: float) -> Tuple[float, float]:
+			x = padding + (x_m - min_x) * scale
+			y = h - (padding + (y_m - min_y) * scale)
 			return x, y
 
 		canvas_coords = []
-		for lon, lat in points:
-			x, y = to_canvas(lon, lat)
+		for x_m, y_m in points:
+			x, y = to_canvas(x_m, y_m)
 			canvas_coords.extend([x, y])
 
 		self.canvas.create_polygon(
@@ -450,7 +468,7 @@ class RoofDesktopApp:
 			stipple="gray25",
 		)
 
-		point_x, point_y = to_canvas(point[1], point[0])
+		point_x, point_y = to_canvas(0.0, 0.0)
 		r = 5
 		self.canvas.create_oval(point_x - r, point_y - r, point_x + r, point_y + r, fill="#e91e63", outline="#9f1242")
 
