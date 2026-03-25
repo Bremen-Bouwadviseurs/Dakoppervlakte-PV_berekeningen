@@ -291,7 +291,7 @@ class RoofDesktopApp:
 		ttk.Label(left, text="Adres", style="Field.TLabel").pack(anchor="w")
 		self.address_entry = ttk.Entry(left, width=42, font=("Segoe UI", 10))
 		self.address_entry.pack(fill="x", pady=(6, 10))
-		self.address_entry.insert(0, "Bijv. Coolsingel 40, Rotterdam")
+		self.address_entry.insert(0, "Bijv. Parallelweg 2-B, Heerlen")
 		self.address_entry.bind("<FocusIn>", self._clear_placeholder)
 		self.address_entry.bind("<Return>", self._on_calculate)
 
