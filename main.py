@@ -497,7 +497,7 @@ class RoofDesktopApp:
 		self.root = root
 		self.root.title("Dakoppervlakte en zonnepanelen - Bremen Bouwadviseurs BV")
 		self.root.geometry("1080x700")
-		self.root.minsize(920, 620)
+		self.root.minsize(920, 820)
 		self.root.configure(bg="#eaf1f7")
 
 		self.available_orientations = load_available_orientations()
