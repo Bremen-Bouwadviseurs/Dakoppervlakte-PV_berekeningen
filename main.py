@@ -7,6 +7,7 @@ from tkinter import messagebox, ttk
 from typing import Dict, List, Optional, Tuple
 
 import requests
+from PIL import Image, ImageTk
 
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -540,9 +541,22 @@ class RoofDesktopApp:
 		self.panel_width_var = tk.StringVar(value="1.0")
 		self.orientation_var = tk.StringVar(value=self._default_orientation_text())
 
+		self._load_logo()
 		self._build_styles()
 		self._build_ui()
 		self._update_canvas_cursor()
+
+	def _load_logo(self) -> None:
+		try:
+			logo_path = Path(__file__).parent / "bba-logo.png"
+			if logo_path.exists():
+				logo_img = Image.open(logo_path)
+				logo_img.thumbnail((80, 80), Image.Resampling.LANCZOS)
+				self.logo_photo = ImageTk.PhotoImage(logo_img)
+			else:
+				self.logo_photo = None
+		except Exception:
+			self.logo_photo = None
 
 	def _default_orientation_text(self) -> str:
 		if self.available_orientations:
@@ -605,9 +619,21 @@ class RoofDesktopApp:
 
 		header = ttk.Frame(main, style="Panel.TFrame", padding=16)
 		header.pack(fill="x", pady=(0, 12))
-		ttk.Label(header, text="Dakoppervlakte Calculator", style="Title.TLabel").pack(anchor="w")
+		
+		# Logo en titel naast elkaar
+		header_top = ttk.Frame(header, style="Panel.TFrame")
+		header_top.pack(anchor="w")
+		
+		if self.logo_photo:
+			logo_label = tk.Label(header_top, image=self.logo_photo, bg="#ffffff")
+			logo_label.pack(side="left", padx=(0, 16))
+		
+		text_frame = ttk.Frame(header_top, style="Panel.TFrame")
+		text_frame.pack(side="left", fill="x", expand=True)
+		
+		ttk.Label(text_frame, text="Dakoppervlakte Calculator", style="Title.TLabel").pack(anchor="w")
 		ttk.Label(
-			header,
+			text_frame,
 			text=(
 				"Voer een adres in, kies paneelmaat en orientatie. "
 				"Zoom met het muiswiel, sleep om te bewegen en teken no-go zones in rood."
