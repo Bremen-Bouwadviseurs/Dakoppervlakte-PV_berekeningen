@@ -399,7 +399,7 @@ def point_in_axis_aligned_rect(
 
 def panel_intersects_no_go(
 	panel: List[Tuple[float, float]],
-	no_go_rectangles: List[Tuple[float, float, float, float]],
+	no_go_polygons: List[List[Tuple[float, float]]],
 ) -> bool:
 	if len(panel) < 3:
 		return False
@@ -409,29 +409,25 @@ def panel_intersects_no_go(
 		for i in range(len(panel))
 	]
 
-	for rect in no_go_rectangles:
-		min_x, min_y, max_x, max_y = rect
-		rect_corners = [
-			(min_x, min_y),
-			(max_x, min_y),
-			(max_x, max_y),
-			(min_x, max_y),
-		]
-		rect_edges = [
-			(rect_corners[i], rect_corners[(i + 1) % 4])
-			for i in range(4)
+	for no_go in no_go_polygons:
+		if len(no_go) < 3:
+			continue
+
+		no_go_edges = [
+			(no_go[i], no_go[(i + 1) % len(no_go)])
+			for i in range(len(no_go))
 		]
 
-		if any(point_in_axis_aligned_rect(px, py, rect) for px, py in panel):
+		if any(point_in_polygon_xy(px, py, no_go) for px, py in panel):
 			return True
 
-		if any(point_in_polygon_xy(rx, ry, panel) for rx, ry in rect_corners):
+		if any(point_in_polygon_xy(nx, ny, panel) for nx, ny in no_go):
 			return True
 
 		for (p1, p2) in panel_edges:
-			for (r1, r2) in rect_edges:
+			for (n1, n2) in no_go_edges:
 				if segments_intersect(
-					p1[0], p1[1], p2[0], p2[1], r1[0], r1[1], r2[0], r2[1]
+					p1[0], p1[1], p2[0], p2[1], n1[0], n1[1], n2[0], n2[1]
 				):
 					return True
 
@@ -445,12 +441,12 @@ def compute_panel_layout(
 	orientation_deg: float,
 	spacing_m: float = 0.2,
 	edge_clearance_m: float = 2.0,
-	no_go_rectangles: Optional[List[Tuple[float, float, float, float]]] = None,
+	no_go_polygons: Optional[List[List[Tuple[float, float]]]] = None,
 ) -> List[List[Tuple[float, float]]]:
 	if len(polygon_xy) < 3 or panel_length_m <= 0 or panel_width_m <= 0:
 		return []
-	if no_go_rectangles is None:
-		no_go_rectangles = []
+	if no_go_polygons is None:
+		no_go_polygons = []
 
 	if polygon_xy[0] == polygon_xy[-1]:
 		poly = polygon_xy[:-1]
@@ -488,7 +484,7 @@ def compute_panel_layout(
 				for px, py in check_points
 			):
 				panel_world = [rotate_point(px, py, orientation_deg) for px, py in rect]
-				if not panel_intersects_no_go(panel_world, no_go_rectangles):
+				if not panel_intersects_no_go(panel_world, no_go_polygons):
 					panels.append(panel_world)
 			x += step_x
 		y += step_y
@@ -513,7 +509,7 @@ class RoofDesktopApp:
 		self.last_panel_length_m: float = 2.0
 		self.last_panel_width_m: float = 1.0
 
-		self.no_go_rectangles: List[Tuple[float, float, float, float]] = []
+		self.no_go_polygons: List[List[Tuple[float, float]]] = []
 		self.no_go_mode_var = tk.BooleanVar(value=False)
 		self.edge_pick_mode_var = tk.BooleanVar(value=False)
 		self.selected_roof_edge: Optional[Tuple[Tuple[float, float], Tuple[float, float]]] = None
@@ -804,7 +800,7 @@ class RoofDesktopApp:
 				orientation_deg=orientation_deg,
 				spacing_m=0.2,
 				edge_clearance_m=2.0,
-				no_go_rectangles=[],
+				no_go_polygons=[],
 			)
 
 			display_name = location.get("display_name", "Onbekende locatie")
@@ -858,7 +854,7 @@ class RoofDesktopApp:
 		self.last_panel_length_m = panel_length_m
 		self.last_panel_width_m = panel_width_m
 		self.selected_roof_edge = None
-		self.no_go_rectangles = []
+		self.no_go_polygons = []
 		self.no_go_mode_var.set(False)
 		self.edge_pick_mode_var.set(False)
 		self._reset_view(redraw=False)
@@ -891,11 +887,36 @@ class RoofDesktopApp:
 		self._update_canvas_cursor()
 
 	def _on_clear_no_go_zones(self) -> None:
-		if not self.no_go_rectangles:
+		if not self.no_go_polygons:
 			return
-		self.no_go_rectangles = []
+		self.no_go_polygons = []
 		self._recompute_panels()
 		self.status_var.set("No-go zones verwijderd.")
+
+	def _create_oriented_no_go_polygon(
+		self,
+		start_world: Tuple[float, float],
+		end_world: Tuple[float, float],
+		orientation_deg: float,
+	) -> List[Tuple[float, float]]:
+		sx, sy = start_world
+		ex, ey = end_world
+
+		rsx, rsy = rotate_point(sx, sy, -orientation_deg)
+		rex, rey = rotate_point(ex, ey, -orientation_deg)
+
+		min_x = min(rsx, rex)
+		max_x = max(rsx, rex)
+		min_y = min(rsy, rey)
+		max_y = max(rsy, rey)
+
+		rotated_rect = [
+			(min_x, min_y),
+			(max_x, min_y),
+			(max_x, max_y),
+			(min_x, max_y),
+		]
+		return [rotate_point(px, py, orientation_deg) for px, py in rotated_rect]
 
 	def _reset_view(self, redraw: bool = True) -> None:
 		self.view_zoom = 1.0
@@ -975,13 +996,20 @@ class RoofDesktopApp:
 			end_world = self._canvas_to_world(*self.no_go_current_canvas)
 
 			if start_world and end_world:
-				min_x = min(start_world[0], end_world[0])
-				max_x = max(start_world[0], end_world[0])
-				min_y = min(start_world[1], end_world[1])
-				max_y = max(start_world[1], end_world[1])
+				no_go_poly = self._create_oriented_no_go_polygon(
+					start_world,
+					end_world,
+					self.last_orientation_deg,
+				)
 
-				if (max_x - min_x) >= 0.1 and (max_y - min_y) >= 0.1:
-					self.no_go_rectangles.append((min_x, min_y, max_x, max_y))
+				edge_a = no_go_poly[0]
+				edge_b = no_go_poly[1]
+				edge_d = no_go_poly[3]
+				width_m = math.hypot(edge_b[0] - edge_a[0], edge_b[1] - edge_a[1])
+				height_m = math.hypot(edge_d[0] - edge_a[0], edge_d[1] - edge_a[1])
+
+				if width_m >= 0.1 and height_m >= 0.1:
+					self.no_go_polygons.append(no_go_poly)
 					self._recompute_panels()
 					self.status_var.set("No-go zone toegevoegd.")
 
@@ -1092,7 +1120,7 @@ class RoofDesktopApp:
 			orientation_deg=self.last_orientation_deg,
 			spacing_m=0.2,
 			edge_clearance_m=2.0,
-			no_go_rectangles=self.no_go_rectangles,
+			no_go_polygons=self.no_go_polygons,
 		)
 		self.panel_count_var.set(f"{len(self.last_panels)} panelen")
 		self._draw_scene()
@@ -1174,15 +1202,11 @@ class RoofDesktopApp:
 				width=1,
 			)
 
-		for min_x, min_y, max_x, max_y in self.no_go_rectangles:
-			rect_world = [
-				(min_x, min_y),
-				(max_x, min_y),
-				(max_x, max_y),
-				(min_x, max_y),
-			]
+		for no_go_poly in self.no_go_polygons:
+			if len(no_go_poly) < 3:
+				continue
 			rect_coords: List[float] = []
-			for x_m, y_m in rect_world:
+			for x_m, y_m in no_go_poly:
 				x, y = self._world_to_canvas(x_m, y_m, w, h)
 				rect_coords.extend([x, y])
 			self.canvas.create_polygon(
@@ -1194,17 +1218,25 @@ class RoofDesktopApp:
 			)
 
 		if self.is_drawing_no_go and self.no_go_start_canvas and self.no_go_current_canvas:
-			x1, y1 = self.no_go_start_canvas
-			x2, y2 = self.no_go_current_canvas
-			self.canvas.create_rectangle(
-				x1,
-				y1,
-				x2,
-				y2,
-				outline="#ba1515",
-				dash=(4, 3),
-				width=2,
-			)
+			start_world = self._canvas_to_world(*self.no_go_start_canvas)
+			end_world = self._canvas_to_world(*self.no_go_current_canvas)
+			if start_world and end_world:
+				preview_poly = self._create_oriented_no_go_polygon(
+					start_world,
+					end_world,
+					self.last_orientation_deg,
+				)
+				preview_coords: List[float] = []
+				for x_m, y_m in preview_poly:
+					x, y = self._world_to_canvas(x_m, y_m, w, h)
+					preview_coords.extend([x, y])
+				self.canvas.create_polygon(
+					preview_coords,
+					outline="#ba1515",
+					fill="",
+					dash=(4, 3),
+					width=2,
+				)
 
 		self.canvas.create_text(
 			12,
